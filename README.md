@@ -1,4 +1,8 @@
 ﻿# CVGadget
-+  This is a repository store some work in my daily learning in computer vision  
+2017.12.15
++  RIP Image Segment, I delete it carelessly
 
-Philip 2017.12.14
+2017.12.14
++  This is a repository store some work in my daily learning in computer vision    
+
+Philip 

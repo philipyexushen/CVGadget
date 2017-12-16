@@ -12,6 +12,16 @@ def DrawPoint(imgSrc:np.ndarray, imgCorner:np.ndarray):
 
 if __name__ == "__main__":
     font_set = FontProperties(fname=r"c:\windows\fonts\msyh.ttc", size=12)
+    imgSrc = plt.imread("E:/Users/Administrator/pictures/Test/user.jpg")
+    imgDst = PCAImage(imgSrc)
+
+    plt.figure(1)
+    plt.subplot(121), plt.imshow(imgSrc), plt.title("Source", fontproperties=font_set)
+    plt.subplot(122), plt.imshow(imgDst), plt.title("Result", fontproperties=font_set)
+    plt.show()
+
+    '''
+    font_set = FontProperties(fname=r"c:\windows\fonts\msyh.ttc", size=12)
     imgSrc = plt.imread("E:/Users/Administrator/pictures/Test/man.png")
     # imgSrc = plt.imread("E:/Users/Administrator/pictures/Test/user.jpg")
     imgGray = cv.cvtColor(imgSrc, cv.COLOR_RGB2GRAY)
@@ -24,12 +34,14 @@ if __name__ == "__main__":
     plt.subplot(121), plt.imshow(imgGray, cmap="gray"), plt.title("Source", fontproperties=font_set)
     plt.subplot(122), plt.imshow(imgDst, cmap="gray"), plt.title("Result", fontproperties=font_set)
     plt.show()
-
+    '''
     '''
     font_set = FontProperties(fname=r"c:\windows\fonts\msyh.ttc", size=12)
-    imgSrc = plt.imread("E:/Users/Administrator/pictures/Test/man.png")
+    imgSrc = plt.imread("E:/Users/Administrator/pictures/Test/user.jpg")
+    PCAImage(imgSrc)
     # imgSrc = plt.imread("E:/Users/Administrator/pictures/Test/user.jpg")
     imgGray = cv.cvtColor(imgSrc, cv.COLOR_RGB2GRAY)
+
     cv.normalize(imgGray, imgGray, 0, 255, cv.NORM_MINMAX)
     #th, imgGray = cv.threshold(imgGray, 23, 255, cv.THRESH_BINARY)
     imgGray = cv.threshold(np.uint8(imgGray), 0, 255, cv.THRESH_OTSU)[1]

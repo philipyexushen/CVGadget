@@ -4,7 +4,10 @@ import numpy.linalg as npl
 @MethodInformProvider
 def SIFT(imgSrc:np.ndarray)->np.ndarray:
     # Scale-invariant feature transform
-    pass
+    # 1. 建立图像尺度空间(或高斯金字塔)，并检测极值点
+    kernel = cv.getGaussianKernel(5, np.sqrt(2))
+    
+    return kernel
 
 
 @MethodInformProvider

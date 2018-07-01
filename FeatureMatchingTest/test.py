@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from matplotlib.font_manager import FontProperties
 from feature import *
 from contours import *
+from siftInner import *
 
 def DrawPoint(imgSrc:np.ndarray, imgCorner:np.ndarray):
     points = np.where(imgCorner == 0xff)
@@ -13,12 +14,20 @@ def DrawPoint(imgSrc:np.ndarray, imgCorner:np.ndarray):
 if __name__ == "__main__":
     font_set = FontProperties(fname=r"c:\windows\fonts\msyh.ttc", size=12)
     imgSrc = plt.imread("E:/Users/Administrator/pictures/Test/user.jpg")
+
+    factory = SiftFeature2D(imgSrc)
+    factory.GetFeatures()
+
+    '''
     imgDst = PCAImage(imgSrc)
+    # imgDst = PCAImage(cv.transpose(imgSrc))
 
     plt.figure(1)
     plt.subplot(121), plt.imshow(imgSrc), plt.title("Source", fontproperties=font_set)
     plt.subplot(122), plt.imshow(imgDst), plt.title("Result", fontproperties=font_set)
     plt.show()
+    '''
+
 
     '''
     font_set = FontProperties(fname=r"c:\windows\fonts\msyh.ttc", size=12)

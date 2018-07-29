@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 import matplotlib.pyplot as plt
 from matplotlib.font_manager import FontProperties
 from feature import *
@@ -72,8 +71,8 @@ if __name__ == "__main__":
     plt.figure(2), plt.imshow(imgDst, cmap="gray"), plt.title("Result", fontproperties=font_set)
     # plt.show()
 
-    # 注意下面非最大值抑制的方法
-    # 自己Harris角点检测的方法
+    # ע����������ֵ���Ƶķ���
+    # �Լ�Harris�ǵ���ķ���
     imgDst = CornerHarris(imgSrc, 0.01)
     maxM = np.max(imgDst)
     imgDilate = cv.dilate(imgDst, np.array([[1, 1, 1], [1, 1, 1], [1, 1, 1]]))
@@ -84,7 +83,7 @@ if __name__ == "__main__":
     
     DrawPoint(imgResult, imgCorner)
 
-    # opencv标准Harris角点检测方法
+    # opencv��׼Harris�ǵ��ⷽ��
     imgDst = cv.cornerHarris(cv.cvtColor(np.float32(imgSrc), cv.COLOR_RGB2GRAY), 3, 3, 0.01)
     maxM = np.max(imgDst)
     imgDilate = cv.dilate(imgDst, np.array([[1, 1, 1], [1, 1, 1], [1, 1, 1]]))

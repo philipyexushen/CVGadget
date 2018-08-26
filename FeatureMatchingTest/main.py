@@ -13,7 +13,8 @@ def DrawPoint(imgSrc:np.ndarray, imgCorner:np.ndarray):
 if __name__ == "__main__":
     font_set = FontProperties(fname=r"c:\windows\fonts\msyh.ttc", size=12)
     imgSrc = plt.imread("E:/Users/Administrator/pictures/Test/user.jpg")
-
+    # imgSrc = plt.imread("F:/win10/Philip/Documents/MATLAB/sift/scene.pgm")
+    # imgSrc = plt.imread("E:/Users/Administrator/pictures/queen/13.jpg")
     factory = SiftFeature2D(imgSrc)
     factory.GetFeatures()
 

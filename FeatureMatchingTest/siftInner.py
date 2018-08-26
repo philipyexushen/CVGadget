@@ -190,7 +190,7 @@ class SiftFeature2D:
         return True
 
     @MethodInformProvider
-    def __AccurateKeyPointLocalization(self, imgSrc, pyramid_DOG_list, octaves_layer_num, octaves_num)->list:
+    def __AccurateKeyPointLocalization(self, pyramid_DOG_list, octaves_layer_num, octaves_num)->list:
         border = self.__sift_img_border
         threshold = self.__extreme_point_value_threshold / octaves_num * 1/2
 
@@ -245,15 +245,17 @@ class SiftFeature2D:
 
                 # 让范围落在self.__ori_hist_bins之内
                 angle = int(round(self.__ori_hist_bins*(theta + np.pi) / (2*np.pi)) % self.__ori_hist_bins)
+                angle %= self.__ori_hist_bins
                 histogram[angle] += w*m
 
         temp_histogram = histogram.copy()
 
         # 对直方图进行平滑处理
+        total_size = len(temp_histogram)
         for i in range(self.__ori_hist_bins):
-            histogram = 1 / 16 *(temp_histogram[i - 2] + temp_histogram[i + 2]) \
-                        + 4 / 16 *(temp_histogram[i - 1] + temp_histogram[i + 1]) \
-                        + 6 * temp_histogram[i] / 16
+            histogram[i] = 1 / 16 *(temp_histogram[(i - 2) % total_size] + temp_histogram[(i + 2)% total_size]) \
+                         + 4 / 16 *(temp_histogram[(i - 1)% total_size] + temp_histogram[(i + 1)% total_size]) \
+                         + 6 * temp_histogram[i % total_size] / 16
 
         return histogram
 
@@ -274,11 +276,19 @@ class SiftFeature2D:
 
             # 添加主方向和辅助方向（大于主峰80%）
             for i in range(len(histogram)):
-                if np.max(histogram[i - 1: i + 1]) != histogram[i]:
+                cur = histogram[i]
+                if i == 0:
+                    left = histogram[-1]
+                    right = histogram[1]
+                elif i == len(histogram) - 1:
+                    left = histogram[i - 1]
+                    right = histogram[0]
+
+                if np.max((left, cur, right)) != cur:
                     continue
-                if histogram[i] < max_val * self.__ori_peak_ratio:
+                if cur < max_val * self.__ori_peak_ratio:
                     continue
-                pos = self.__HistogramInterp(i, histogram[i - 1], histogram[i], histogram[i + 1])
+                pos = self.__HistogramInterp(i, left, cur, right)
 
                 angle = pos / self.__ori_hist_bins * 2 *np.pi - np.pi
                 feature = (key_point, angle)
@@ -299,12 +309,25 @@ class SiftFeature2D:
         # 先对图片从uint8转成flaot，归一化
 
         pyramid_DOG_list = self.__BuildDogPyramid(imgSrc, init_sigma, octaves_layer_num, octaves_num)
-        key_point_array = self.__AccurateKeyPointLocalization(imgSrc, pyramid_DOG_list, octaves_layer_num, octaves_num)
+        key_point_array = self.__AccurateKeyPointLocalization(pyramid_DOG_list, octaves_layer_num, octaves_num)
+        feature_array = self.__CalculateOrientationHist(pyramid_DOG_list, key_point_array)
+
         print(len(key_point_array))
         imgDst = self.__imgSrc
-        for point in key_point_array:
+        for feature in feature_array:
+            point = feature[0]
             h, w, _, octave = point[:4]
-            imgDst = cv.circle(imgDst,(round(w*(2**(octave - 1))), round(h*(2**(octave - 1)))), 5, (255, 255,0))
+
+            real_w = round(w*(2**(octave - 1)))
+            real_h = round(h*(2**(octave - 1)))
+            imgDst = cv.circle(imgDst,(real_w, real_h), 5, (255, 255,0))
+
+            angle = feature[1]
+            real_h_pt = real_h + 5 * np.sin(angle)
+            real_w_pt = real_w + 5 * np.cos(angle)
+
+            cv.arrowedLine(imgDst, (real_w, real_h), (real_w_pt, real_h_pt), (255, 255, 0))
+
 
         if len(np.shape(imgSrc)) == 3:
             imgDst = cv.cvtColor(imgDst, cv.COLOR_BGR2RGB)

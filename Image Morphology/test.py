@@ -1,6 +1,6 @@
 #-*- coding: utf-8 -*-
 import numpy as np
-import cv2 as cv
+import cv2.cv2 as cv
 import matplotlib.pyplot as plt
 from numba import jit
 from matplotlib.font_manager import FontProperties

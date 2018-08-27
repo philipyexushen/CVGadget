@@ -217,7 +217,7 @@ class SiftFeature2D:
         height, width = imgSrc.shape[:2]
 
         assert 1 <= c < width and 1 <= r <height
-        dy = imgSrc[r + 1, c] - imgSrc[r - c, c]
+        dy = imgSrc[r + 1, c] - imgSrc[r - 1, c]
         dx = imgSrc[r, c + 1] - imgSrc[r, c - 1]
 
         m = np.sqrt(dx**2 + dy**2)
@@ -318,13 +318,13 @@ class SiftFeature2D:
             point = feature[0]
             h, w, _, octave = point[:4]
 
-            real_w = round(w*(2**(octave - 1)))
-            real_h = round(h*(2**(octave - 1)))
+            real_w = int(round(w*(2**(octave - 1))))
+            real_h = int(round(h*(2**(octave - 1))))
             imgDst = cv.circle(imgDst,(real_w, real_h), 5, (255, 255,0))
 
             angle = feature[1]
-            real_h_pt = real_h + 5 * np.sin(angle)
-            real_w_pt = real_w + 5 * np.cos(angle)
+            real_h_pt = int(real_h + 5 * np.sin(angle))
+            real_w_pt = int(real_w + 5 * np.cos(angle))
 
             cv.arrowedLine(imgDst, (real_w, real_h), (real_w_pt, real_h_pt), (255, 255, 0))
 

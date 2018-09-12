@@ -2,7 +2,7 @@ from common import *
 from matplotlib import pyplot as plt
 from numba import jit
 
-def gaussian_kernel_2d_opencv(kernel_size=3, sigma=0):
+def _gaussian_kernel_2d_opencv(kernel_size=3, sigma=0):
     kx = cv.getGaussianKernel(kernel_size, sigma)
     ky = cv.getGaussianKernel(kernel_size, sigma)
     return np.multiply(kx, np.transpose(ky))
@@ -16,6 +16,9 @@ class SiftFeature2D:
         self.__ori_peak_ratio = 0.8
         self.__ori_hist_bins = 36
         self.__ori_sig_fact = 1.5
+
+        self.__region_size = 4                  # 划分区域大小
+        self.__region_ori_calc = 8              # 每个区域要计算的方向个数 360 / k = angle
 
     def __BuildDogPyramid(self, imgSrc, init_sigma, octaves_layer_num ,octaves_num):
         k = 2**(1 / octaves_num)
@@ -50,7 +53,7 @@ class SiftFeature2D:
                                                           dsize=(cur_width, cur_height), interpolation=cv.INTER_CUBIC)
                 else:
                     prev_img = current_layer_pack[layer - 1]
-                    current_layer_pack[layer] = self.__gaussian(prev_img, sigma[layer])
+                    current_layer_pack[layer] = self.__Gaussian(prev_img, sigma[layer])
 
             cur_height = cur_height // 2
             cur_width = cur_width // 2
@@ -75,17 +78,17 @@ class SiftFeature2D:
         return pyramid_DOG_list
 
     @staticmethod
-    def __gaussian(img, sigma):
+    def __Gaussian(img, sigma):
         k = 3
         k_size = round(2 * k * sigma + 1)
         if k_size % 2 == 0:
             k_size = k_size + 1
-        kernel = gaussian_kernel_2d_opencv(int(k_size), sigma)
+        kernel = _gaussian_kernel_2d_opencv(int(k_size), sigma)
         out_img = cv.filter2D(img, -1, cv.flip(kernel, -1), borderType=cv.BORDER_CONSTANT)
         return out_img
 
     @staticmethod
-    def __isMaximumPoint(pyramid_DOG_list, octave, layer, r, c, threshold):
+    def __IsMaximumPoint(pyramid_DOG_list, octave, layer, r, c, threshold):
         img_current = pyramid_DOG_list[octave][layer]
         img_prev = pyramid_DOG_list[octave][layer - 1]
         img_next = pyramid_DOG_list[octave][layer + 1]
@@ -103,7 +106,7 @@ class SiftFeature2D:
 
         return value <= np.min(img_block_current) and value <= np.min(img_block_prev) and value <= np.min(img_block_next)
 
-    def __adjustLocalExtrema(self, pyramid_DOG_list, octave, vector, threshold, octaves_layer_num, octaves_num, key_point_array: list):
+    def __AdjustLocalExtrema(self, pyramid_DOG_list, octave, vector, threshold, octaves_layer_num, octaves_num, key_point_array: list):
         """
         插值和删除边缘效应
         :return:
@@ -202,10 +205,10 @@ class SiftFeature2D:
                     for c in range(border, w - border):
                         # 是否是极值点
                         img = pyramid_DOG_list[octave][layer]
-                        if not self.__isMaximumPoint(pyramid_DOG_list ,octave, layer, r, c, threshold):
+                        if not self.__IsMaximumPoint(pyramid_DOG_list , octave, layer, r, c, threshold):
                             continue
                         vector = [r, c, layer]
-                        if not self.__adjustLocalExtrema(pyramid_DOG_list, octave, vector,
+                        if not self.__AdjustLocalExtrema(pyramid_DOG_list, octave, vector,
                                                          self.__extreme_point_value_threshold,
                                                          octaves_layer_num, octaves_num, key_point_array):
                             continue
@@ -296,6 +299,99 @@ class SiftFeature2D:
 
         return feature_array
 
+    @staticmethod
+    def __InterpolateHist(hist, r_bin, c_bin, theta_norm, m, descriptor_block_width, descriptor_ori_sum):
+        r0 = int(np.floor(r_bin))
+        c0 = int(np.floor(c_bin))
+        o0 = int(np.floor(theta_norm))
+        d_r = r_bin - r0
+        d_c = c_bin - c0
+        d_o = theta_norm - o0
+
+        for i in range(1):
+            if r0 + i >= descriptor_block_width or r0 + i < 0:
+                continue
+            for j in range(1):
+                if c0 + j >= descriptor_block_width or c0 + j < 0:
+                    continue
+                for k in range(1):
+                    theta_norm_index = (theta_norm + k) % descriptor_ori_sum
+
+                    # 双线性插值
+                    # 下面这个写的好像很复杂，其实你把0和1代进去就看出来是什么了...，就是(1- x)和x的组合
+                    value = m * ( 0.5 + (d_r - 0.5)*(2*i-1) ) \
+                                * ( 0.5 + (d_c - 0.5)*(2*j-1) ) \
+                                * ( 0.5 + (d_o - 0.5)*(2*k-1) )
+
+                    hist_index = int((r0 + i)*descriptor_block_width*descriptor_ori_sum
+                                 + (c0 + j)*descriptor_block_width + theta_norm_index + k)
+
+                    hist[hist_index] = hist[hist_index] + value
+
+    @staticmethod
+    def __RemoveLightEffect(hist, descriptor_mag_thr):
+        hist = hist / np.linalg.norm(hist)
+        hist = np.where(hist >= descriptor_mag_thr, hist, 0)
+        hist = hist / np.linalg.norm(hist)
+        return hist
+
+    @MethodInformProvider
+    def __DescriptorGeneration(self, pyramid_DOG_list, feature_array, init_sigma):
+        m = 3
+        descriptor_block_num = 4
+        descriptor_block_width = 4
+        descriptor_ori_sum = 8
+        # 8个方向，4*4个区域，一共128维
+        descriptor_size = descriptor_block_width*descriptor_block_width*descriptor_ori_sum
+        descriptor_mag_thr = 0.2
+
+        descriptor_list = []
+
+        for item in feature_array:
+            key_point, angle = item
+            r, c, layer, octave, oct_sigma = key_point
+
+            img = pyramid_DOG_list[octave][layer][r,c]
+            # 4*4个区域，每个区域宽度为4，考虑到双线性插值，所以d+ 1，另外再考虑到旋转，要包括45度的情况
+            radius = int(np.round(descriptor_block_num * (descriptor_block_width + 1) *np.sqrt(2) / 2))
+            hist_width = init_sigma*oct_sigma*m
+
+            hist = np.zeros(descriptor_size, dtype=np.float32)
+            for i in range(int(-radius), int(radius)):
+                for j in range(int(-radius), int(radius)):
+                    '''
+                    # Calculate sample's histogram array coords rotated relative to ori.
+                    # Subtract 0.5 so samples that fall e.g. in the center of row 1 (i.e.
+                    # r_rot = 1.5) have full weight placed in row 1 after interpolation.
+                    '''
+                    i_rot = i*np.cos(angle) - j*np.sin(angle)
+                    j_rot = j*np.cos(angle) + i*np.sin(angle)
+                    r_bin = i_rot / hist_width + descriptor_block_width / 2 - 0.5
+                    c_bin = j_rot / hist_width + descriptor_block_width / 2 - 0.5
+                    if -1 < r_bin < descriptor_block_width and -1 < c_bin < descriptor_block_width:
+                        h, w = img.shape[:2]
+                        if r + i < 0 or r + i > h or c + j < 0 or c + j > w:
+                            continue
+                        mag, theta = self.__GetGradient(img, r, c)
+                        theta = theta - angle   # 把角度转回来
+                        if theta < 0:
+                            theta = theta + 2 * np.pi
+                        else:
+                            theta = theta - 2 * np.pi
+
+                        # 把角度约束在8个方向内
+                        theta_norm = theta * descriptor_ori_sum/ (2*np.pi)
+                        w = -(i_rot**2 + j_rot**2) / (2 *hist_width**2)
+                        self.__InterpolateHist(hist, r_bin, c_bin, theta_norm,
+                                               mag*w, descriptor_block_width, descriptor_ori_sum)
+
+            hist = self.__RemoveLightEffect(hist, descriptor_mag_thr)
+
+            descriptor_list.append((item, hist))
+
+        sorted(descriptor_list, key=lambda k: k[0][0][4])
+        return descriptor_list
+
 
     @MethodInformProvider
     def GetFeatures(self, init_sigma = 1.6, octaves_layer_num = 5, octaves_num = 3):
@@ -304,13 +400,15 @@ class SiftFeature2D:
             imgSrc = cv.cvtColor(imgSrc, cv.COLOR_BGR2GRAY)
         imgSrc = imgSrc.astype(np.float32) / 255.0
         imgSrc = cv.resize(imgSrc, dsize=(0,0), fx=2.0, fy=2.0, interpolation=cv.INTER_CUBIC)
-        imgSrc = self.__gaussian(imgSrc, np.sqrt(init_sigma**2 - 0.5**2*4))
+        imgSrc = self.__Gaussian(imgSrc, np.sqrt(init_sigma ** 2 - 0.5 ** 2 * 4))
 
         # 先对图片从uint8转成flaot，归一化
 
         pyramid_DOG_list = self.__BuildDogPyramid(imgSrc, init_sigma, octaves_layer_num, octaves_num)
         key_point_array = self.__AccurateKeyPointLocalization(pyramid_DOG_list, octaves_layer_num, octaves_num)
         feature_array = self.__CalculateOrientationHist(pyramid_DOG_list, key_point_array)
+
+        self.__DescriptorGeneration(pyramid_DOG_list, feature_array, init_sigma)
 
         print(len(key_point_array))
         imgDst = self.__imgSrc
@@ -320,11 +418,11 @@ class SiftFeature2D:
 
             real_w = int(round(w*(2**(octave - 1))))
             real_h = int(round(h*(2**(octave - 1))))
-            imgDst = cv.circle(imgDst,(real_w, real_h), 5, (255, 255,0))
+            cv.circle(imgDst,(real_w, real_h), 5, (255, 255,0))
 
             angle = feature[1]
-            real_h_pt = int(real_h + 5 * np.sin(angle))
-            real_w_pt = int(real_w + 5 * np.cos(angle))
+            real_h_pt = int(real_h + 10 * np.sin(angle))
+            real_w_pt = int(real_w + 10 * np.cos(angle))
 
             cv.arrowedLine(imgDst, (real_w, real_h), (real_w_pt, real_h_pt), (255, 255, 0))
 

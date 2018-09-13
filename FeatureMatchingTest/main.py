@@ -9,14 +9,57 @@ def DrawPoint(imgSrc:np.ndarray, imgCorner:np.ndarray):
     for i, j in zip(points[1], points[0]):
         cv.circle(imgSrc, (i, j) , 3, (0xff, 0, 0xff), -1)
 
+def DrawFeature(imgSrc:np.ndarray, feature_array, index_choice):
+    imgDst = imgSrc.copy()
+    for i, feature in enumerate(feature_array):
+        if i not in index_choice:
+            continue
+        point = feature[0]
+        h, w, _, octave = point[:4]
+
+        real_w = int(round(w * (2 ** (octave - 1))))
+        real_h = int(round(h * (2 ** (octave - 1))))
+        cv.circle(imgDst, (real_w, real_h), 5, (255, 255, 0))
+
+        angle = feature[1]
+        real_h_pt = int(real_h + 10 * np.sin(angle))
+        real_w_pt = int(real_w + 10 * np.cos(angle))
+
+        cv.arrowedLine(imgDst, (real_w, real_h), (real_w_pt, real_h_pt), (255, 255, 0))
+    return imgDst
 
 if __name__ == "__main__":
     font_set = FontProperties(fname=r"c:\windows\fonts\msyh.ttc", size=12)
-    imgSrc = plt.imread("E:/Users/Administrator/pictures/Test/user.jpg")
-    # imgSrc = plt.imread("F:/win10/Philip/Documents/MATLAB/sift/scene.pgm")
+    # imgSrc = plt.imread("E:/Users/Administrator/pictures/Test/user.jpg")
+    imgSrc = plt.imread("F:/win10/Philip/Documents/MATLAB/sift/scene.pgm")
+    imgSrc2 = plt.imread("F:/win10/Philip/Documents/MATLAB/sift/book.pgm")
     # imgSrc = plt.imread("E:/Users/Administrator/pictures/queen/13.jpg")
-    factory = SiftFeature2D(imgSrc)
-    factory.GetFeatures()
+    factory1 = SiftFeature2D(imgSrc)
+    descriptor1 = factory1.GetFeatures()
+    factory2 = SiftFeature2D(imgSrc2)
+    descriptor2 = factory2.GetFeatures()
+    feature1_index, feature2_index = Match(descriptor1, descriptor2)
+
+    imgDst1 = DrawFeature(factory1.image_source, factory1.feature_array, feature1_index)
+    imgDst2 = DrawFeature(factory2.image_source, factory2.feature_array, feature2_index)
+
+    plt.figure(1)
+    plt.subplot(121)
+    if len(np.shape(factory1.image_source)) == 3:
+        imgDst = cv.cvtColor(imgDst1, cv.COLOR_BGR2RGB)
+        plt.imshow(imgDst)
+        plt.show()
+    elif len(np.shape(factory1.image_source)) == 2:
+        plt.imshow(imgDst1, cmap="gray")
+
+    plt.subplot(122)
+    if len(np.shape(factory2.image_source)) == 3:
+        imgDst = cv.cvtColor(imgDst1, cv.COLOR_BGR2RGB)
+        plt.imshow(imgDst2)
+    elif len(np.shape(factory2.image_source)) == 2:
+        plt.imshow(imgDst2, cmap="gray")
+
+    plt.show()
 
     '''
     imgDst = PCAImage(imgSrc)

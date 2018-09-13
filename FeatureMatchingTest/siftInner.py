@@ -20,6 +20,21 @@ class SiftFeature2D:
         self.__region_size = 4                  # 划分区域大小
         self.__region_ori_calc = 8              # 每个区域要计算的方向个数 360 / k = angle
 
+        self.__feature_array = None
+        self.__descriptor_list = None
+
+    @property
+    def feature_array(self):
+        return self.__feature_array
+
+    @property
+    def descriptor_list(self):
+        return self.__descriptor_list
+
+    @property
+    def image_source(self):
+        return self.__imgSrc
+
     def __BuildDogPyramid(self, imgSrc, init_sigma, octaves_layer_num ,octaves_num):
         k = 2**(1 / octaves_num)
         sigma = np.zeros([octaves_layer_num + 3], dtype=np.float64)
@@ -241,7 +256,7 @@ class SiftFeature2D:
 
         for i in range(-radius, radius):
             for j in range(-radius, radius):
-                if r + i < 0 or r + i > h or c + j < 0 or c + j > w:
+                if r + i <= 0 or r + i >= h or c + j <= 0 or c + j >= w:
                     continue
                 m, theta = self.__GetGradient(imgSrc, r + i, c + j)
                 w = np.exp((i*i +j*j)/exp_sigma)
@@ -351,7 +366,7 @@ class SiftFeature2D:
             key_point, angle = item
             r, c, layer, octave, oct_sigma = key_point
 
-            img = pyramid_DOG_list[octave][layer][r,c]
+            img = pyramid_DOG_list[octave][layer]
             # 4*4个区域，每个区域宽度为4，考虑到双线性插值，所以d+ 1，另外再考虑到旋转，要包括45度的情况
             radius = int(np.round(descriptor_block_num * (descriptor_block_width + 1) *np.sqrt(2) / 2))
             hist_width = init_sigma*oct_sigma*m
@@ -381,7 +396,7 @@ class SiftFeature2D:
 
                         # 把角度约束在8个方向内
                         theta_norm = theta * descriptor_ori_sum/ (2*np.pi)
-                        w = -(i_rot**2 + j_rot**2) / (2 *hist_width**2)
+                        w = np.exp(-(i_rot**2 + j_rot**2) / (2 *hist_width**2))
                         self.__InterpolateHist(hist, r_bin, c_bin, theta_norm,
                                                mag*w, descriptor_block_width, descriptor_ori_sum)
 
@@ -389,9 +404,8 @@ class SiftFeature2D:
 
             descriptor_list.append((item, hist))
 
-        sorted(descriptor_list, key=lambda k: k[0][0][4])
-        return descriptor_list
-
+        descriptor_list = [item[1] for item in sorted(descriptor_list, key=lambda x: x[0][0][4])]
+        return np.array(descriptor_list, np.float32)
 
     @MethodInformProvider
     def GetFeatures(self, init_sigma = 1.6, octaves_layer_num = 5, octaves_num = 3):
@@ -402,23 +416,22 @@ class SiftFeature2D:
         imgSrc = cv.resize(imgSrc, dsize=(0,0), fx=2.0, fy=2.0, interpolation=cv.INTER_CUBIC)
         imgSrc = self.__Gaussian(imgSrc, np.sqrt(init_sigma ** 2 - 0.5 ** 2 * 4))
 
-        # 先对图片从uint8转成flaot，归一化
-
         pyramid_DOG_list = self.__BuildDogPyramid(imgSrc, init_sigma, octaves_layer_num, octaves_num)
         key_point_array = self.__AccurateKeyPointLocalization(pyramid_DOG_list, octaves_layer_num, octaves_num)
-        feature_array = self.__CalculateOrientationHist(pyramid_DOG_list, key_point_array)
+        self.__feature_array = self.__CalculateOrientationHist(pyramid_DOG_list, key_point_array)
+        self.__descriptor_list = self.__DescriptorGeneration(pyramid_DOG_list, self.__feature_array, init_sigma)
 
-        self.__DescriptorGeneration(pyramid_DOG_list, feature_array, init_sigma)
+        return self.descriptor_list
 
-        print(len(key_point_array))
+    def DrawKeyPoint(self):
         imgDst = self.__imgSrc
-        for feature in feature_array:
+        for feature in self.__feature_array:
             point = feature[0]
             h, w, _, octave = point[:4]
 
-            real_w = int(round(w*(2**(octave - 1))))
-            real_h = int(round(h*(2**(octave - 1))))
-            cv.circle(imgDst,(real_w, real_h), 5, (255, 255,0))
+            real_w = int(round(w * (2 ** (octave - 1))))
+            real_h = int(round(h * (2 ** (octave - 1))))
+            cv.circle(imgDst, (real_w, real_h), 5, (255, 255, 0))
 
             angle = feature[1]
             real_h_pt = int(real_h + 10 * np.sin(angle))
@@ -426,13 +439,51 @@ class SiftFeature2D:
 
             cv.arrowedLine(imgDst, (real_w, real_h), (real_w_pt, real_h_pt), (255, 255, 0))
 
-
-        if len(np.shape(imgSrc)) == 3:
+        if len(np.shape(self.__imgSrc)) == 3:
             imgDst = cv.cvtColor(imgDst, cv.COLOR_BGR2RGB)
             plt.imshow(imgDst)
             plt.show()
-        elif len(np.shape(imgSrc)) == 2:
+        elif len(np.shape(self.__imgSrc)) == 2:
             plt.imshow(imgDst, cmap="gray")
             plt.show()
         else:
             raise NotImplementedError("wtf")
+
+
+def Match(descriptor1:np.ndarray, descriptor2:np.ndarray, ratio = 0.2):
+    descriptor2_t = np.transpose(descriptor2)
+    n, length = descriptor1.shape
+    AB_t = np.dot(descriptor1, descriptor2_t)
+
+    SQA = descriptor1**2
+    sumSqA = np.matrix(np.sum(SQA, axis=1))
+    sumSqAEx = np.tile(sumSqA.transpose(), (1, AB_t.shape[1]))
+
+    SQB = descriptor2**2
+    sumSqB = np.sum(SQB, axis=1)
+    sumSqBEx = np.tile(sumSqB, (AB_t.shape[0], 1))
+
+    SqED = sumSqBEx + sumSqAEx - 2 * AB_t
+    SqED[SqED < 0] = 0.0
+    ED = np.sqrt(SqED)
+
+    result = np.min(ED, axis=1)
+    arg_min_index =  np.argmin(ED, axis=1)
+
+    result_min_index = np.where(result < ratio)
+    return result_min_index, arg_min_index[result_min_index]
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

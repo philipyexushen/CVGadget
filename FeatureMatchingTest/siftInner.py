@@ -450,7 +450,7 @@ class SiftFeature2D:
             raise NotImplementedError("wtf")
 
 
-def Match(descriptor1:np.ndarray, descriptor2:np.ndarray, ratio = 0.2):
+def Match(descriptor1:np.ndarray, descriptor2:np.ndarray, ratio = 2e-10):
     descriptor2_t = np.transpose(descriptor2)
     n, length = descriptor1.shape
     AB_t = np.dot(descriptor1, descriptor2_t)
@@ -468,10 +468,10 @@ def Match(descriptor1:np.ndarray, descriptor2:np.ndarray, ratio = 0.2):
     ED = np.sqrt(SqED)
 
     result = np.min(ED, axis=1)
-    arg_min_index =  np.argmin(ED, axis=1)
+    arg_min_index = np.argmin(ED, axis=1)
+    result_min_index = np.where(result > 0)
 
-    result_min_index = np.where(result < ratio)
-    return result_min_index, arg_min_index[result_min_index]
+    return result_min_index[0].tolist()[:100], arg_min_index[result_min_index].tolist()[0][:100]
 
 
 

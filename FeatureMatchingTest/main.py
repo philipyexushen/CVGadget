@@ -40,6 +40,8 @@ if __name__ == "__main__":
     descriptor2 = factory2.GetFeatures()
     feature1_index, feature2_index = Match(descriptor1, descriptor2)
 
+    print(feature1_index)
+    print(feature2_index)
     imgDst1 = DrawFeature(factory1.image_source, factory1.feature_array, feature1_index)
     imgDst2 = DrawFeature(factory2.image_source, factory2.feature_array, feature2_index)
 

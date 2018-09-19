@@ -234,7 +234,7 @@ class SiftFeature2D:
     def __GetGradient(imgSrc, r, c):
         height, width = imgSrc.shape[:2]
 
-        assert 1 <= c < width and 1 <= r <height
+        assert 1 <= c < width - 1 and 1 <= r < height - 1
         dy = imgSrc[r + 1, c] - imgSrc[r - 1, c]
         dx = imgSrc[r, c + 1] - imgSrc[r, c - 1]
 
@@ -323,13 +323,13 @@ class SiftFeature2D:
         d_c = c_bin - c0
         d_o = theta_norm - o0
 
-        for i in range(1):
+        for i in (0, 1):
             if r0 + i >= descriptor_block_width or r0 + i < 0:
                 continue
-            for j in range(1):
+            for j in (0, 1):
                 if c0 + j >= descriptor_block_width or c0 + j < 0:
                     continue
-                for k in range(1):
+                for k in (0, 1):
                     theta_norm_index = (theta_norm + k) % descriptor_ori_sum
 
                     # 双线性插值
@@ -339,21 +339,20 @@ class SiftFeature2D:
                                 * ( 0.5 + (d_o - 0.5)*(2*k-1) )
 
                     hist_index = int((r0 + i)*descriptor_block_width*descriptor_ori_sum
-                                 + (c0 + j)*descriptor_block_width + theta_norm_index + k)
+                                 + (c0 + j)*descriptor_ori_sum + theta_norm_index)
 
                     hist[hist_index] = hist[hist_index] + value
 
     @staticmethod
     def __RemoveLightEffect(hist, descriptor_mag_thr):
         hist = hist / np.linalg.norm(hist)
-        hist = np.where(hist >= descriptor_mag_thr, hist, 0)
+        hist[np.where(hist > 0.2)] = 0.2
         hist = hist / np.linalg.norm(hist)
         return hist
 
     @MethodInformProvider
     def __DescriptorGeneration(self, pyramid_DOG_list, feature_array, init_sigma):
         m = 3
-        descriptor_block_num = 4
         descriptor_block_width = 4
         descriptor_ori_sum = 8
         # 8个方向，4*4个区域，一共128维
@@ -368,35 +367,35 @@ class SiftFeature2D:
 
             img = pyramid_DOG_list[octave][layer]
             # 4*4个区域，每个区域宽度为4，考虑到双线性插值，所以d+ 1，另外再考虑到旋转，要包括45度的情况
-            radius = int(np.round(descriptor_block_num * (descriptor_block_width + 1) *np.sqrt(2) / 2))
             hist_width = init_sigma*oct_sigma*m
+            radius = int(np.round(hist_width * (descriptor_block_width + 1) * np.sqrt(2) / 2))
 
             hist = np.zeros(descriptor_size, dtype=np.float32)
-            for i in range(int(-radius), int(radius)):
-                for j in range(int(-radius), int(radius)):
+            for i in range(int(-radius), int(radius) + 1):
+                for j in range(int(-radius), int(radius) + 1):
                     '''
                     # Calculate sample's histogram array coords rotated relative to ori.
                     # Subtract 0.5 so samples that fall e.g. in the center of row 1 (i.e.
                     # r_rot = 1.5) have full weight placed in row 1 after interpolation.
                     '''
-                    i_rot = i*np.cos(angle) - j*np.sin(angle)
-                    j_rot = j*np.cos(angle) + i*np.sin(angle)
+                    j_rot = j*np.cos(angle) - i*np.sin(angle)
+                    i_rot = j*np.sin(angle) + i*np.cos(angle)
                     r_bin = i_rot / hist_width + descriptor_block_width / 2 - 0.5
                     c_bin = j_rot / hist_width + descriptor_block_width / 2 - 0.5
                     if -1 < r_bin < descriptor_block_width and -1 < c_bin < descriptor_block_width:
-                        h, w = img.shape[:2]
-                        if r + i < 0 or r + i > h or c + j < 0 or c + j > w:
+                        height, width = img.shape[:2]
+                        if r + i < 1 or r + i >= height - 1 or c + j < 1 or c + j >= width - 1:
                             continue
-                        mag, theta = self.__GetGradient(img, r, c)
+                        mag, theta = self.__GetGradient(img, r + i, c + j)
                         theta = theta - angle   # 把角度转回来
                         if theta < 0:
                             theta = theta + 2 * np.pi
-                        else:
+                        elif theta > 2 * np.pi:
                             theta = theta - 2 * np.pi
 
                         # 把角度约束在8个方向内
                         theta_norm = theta * descriptor_ori_sum/ (2*np.pi)
-                        w = np.exp(-(i_rot**2 + j_rot**2) / (2 *hist_width**2))
+                        w = np.exp(-(i_rot**2 + j_rot**2) / (2 *(1 / 2 *descriptor_block_width *hist_width)**2))
                         self.__InterpolateHist(hist, r_bin, c_bin, theta_norm,
                                                mag*w, descriptor_block_width, descriptor_ori_sum)
 
@@ -452,7 +451,7 @@ class SiftFeature2D:
 
 def Match(descriptor1:np.ndarray, descriptor2:np.ndarray, ratio = 2e-10):
     descriptor2_t = np.transpose(descriptor2)
-    n, length = descriptor1.shape
+
     AB_t = np.dot(descriptor1, descriptor2_t)
 
     SQA = descriptor1**2
@@ -464,14 +463,30 @@ def Match(descriptor1:np.ndarray, descriptor2:np.ndarray, ratio = 2e-10):
     sumSqBEx = np.tile(sumSqB, (AB_t.shape[0], 1))
 
     SqED = sumSqBEx + sumSqAEx - 2 * AB_t
-    SqED[SqED < 0] = 0.0
-    ED = np.sqrt(SqED)
+    # SqED[SqED < 0] = 0.0
+    # ED = np.sqrt(SqED)
 
-    result = np.min(ED, axis=1)
-    arg_min_index = np.argmin(ED, axis=1)
-    result_min_index = np.where(result > 0)
+    result = np.min(SqED, axis=1)
+    arg_min_index = np.argmin(SqED, axis=1)
+    result_min_index = np.where(result < 0)
 
-    return result_min_index[0].tolist()[:100], arg_min_index[result_min_index].tolist()[0][:100]
+    return result_min_index[0].tolist()[:20], arg_min_index[result_min_index].tolist()[0][:20]
+
+def Match2(descriptor1:np.ndarray, descriptor2:np.ndarray, ratio = 0.6):
+    descriptor2_t = np.transpose(descriptor2)
+    n, length = descriptor1.shape
+
+    matched = np.zeros((1, n), dtype=np.float32)
+
+    for i in range(n):
+        dotprods = np.dot(descriptor1[i, :], descriptor2_t)
+        index_sorted = np.argsort(dotprods, axis=None)
+        ind = np.unravel_index(index_sorted, dotprods.shape)
+        elem_sorted = dotprods[ind]
+        if elem_sorted[0] < ratio * elem_sorted[1]:
+            matched[i] = index_sorted[0]
+
+    return matched
 
 
 

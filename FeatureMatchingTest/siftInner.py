@@ -77,7 +77,7 @@ class SiftFeature2D:
         cur_height, cur_width = imgSrc.shape[:2]
         pyramid_DOG_list = []
         for octave in range(octaves_num):
-            pyramid_DOG_list.append(np.zeros([octaves_layer_num + 3, cur_height, cur_width], dtype=np.float32))
+            pyramid_DOG_list.append(np.zeros([octaves_layer_num + 2, cur_height, cur_width], dtype=np.float32))
 
             current_layer_pack = pyramid_list[octave]
             current_DOG_layer_pack = pyramid_DOG_list[octave]
@@ -203,23 +203,22 @@ class SiftFeature2D:
         if det <= 0 or tr**2 / det >= (curv_thr + 1)**2 / curv_thr:
             return False
 
-        key_point = (r, c, layer, octave, 2**(layer / octaves_layer_num))
+        key_point = (r, c, layer, octave, 2**((layer + 1) / octaves_layer_num))
         key_point_array.append(key_point)
         return True
 
     @MethodInformProvider
     def __AccurateKeyPointLocalization(self, pyramid_DOG_list, octaves_layer_num, octaves_num)->list:
         border = self.__sift_img_border
-        threshold = self.__extreme_point_value_threshold / octaves_num * 1/2
+        threshold = self.__extreme_point_value_threshold / octaves_layer_num * 1/2
 
         key_point_array = []
         for octave in range(octaves_num):
             h, w = pyramid_DOG_list[octave][0].shape
-            for layer in range(1, octaves_layer_num - 1):
+            for layer in range(1, octaves_layer_num + 1):
                 for r in range(border, h - border):
                     for c in range(border, w - border):
                         # 是否是极值点
-                        img = pyramid_DOG_list[octave][layer]
                         if not self.__IsMaximumPoint(pyramid_DOG_list , octave, layer, r, c, threshold):
                             continue
                         vector = [r, c, layer]
@@ -236,10 +235,10 @@ class SiftFeature2D:
 
         assert 1 <= c < width - 1 and 1 <= r < height - 1
         dy = imgSrc[r + 1, c] - imgSrc[r - 1, c]
-        dx = imgSrc[r, c + 1] - imgSrc[r, c - 1]
+        dx = imgSrc[r, c - 1] - imgSrc[r, c + 1]
 
         m = np.sqrt(dx**2 + dy**2)
-        theta =  np.arctan2(dx, dy)
+        theta =  np.arctan2(dy, dx)
 
         return m, theta
 
@@ -254,16 +253,15 @@ class SiftFeature2D:
         h, w = imgSrc.shape[:2]
         exp_sigma = 2*sigma*sigma
 
-        for i in range(-radius, radius):
-            for j in range(-radius, radius):
+        for i in range(-radius, int(radius + 1)):
+            for j in range(-radius, int(radius + 1)):
                 if r + i <= 0 or r + i >= h or c + j <= 0 or c + j >= w:
                     continue
                 m, theta = self.__GetGradient(imgSrc, r + i, c + j)
-                w = np.exp((i*i +j*j)/exp_sigma)
+                w = np.exp(-(i*i +j*j)/exp_sigma)
 
                 # 让范围落在self.__ori_hist_bins之内
                 angle = int(round(self.__ori_hist_bins*(theta + np.pi) / (2*np.pi)) % self.__ori_hist_bins)
-                angle %= self.__ori_hist_bins
                 histogram[angle] += w*m
 
         temp_histogram = histogram.copy()
@@ -407,7 +405,7 @@ class SiftFeature2D:
         return np.array(descriptor_list, np.float32)
 
     @MethodInformProvider
-    def GetFeatures(self, init_sigma = 1.6, octaves_layer_num = 5, octaves_num = 3):
+    def GetFeatures(self, init_sigma = 1.6, octaves_layer_num = 3, octaves_num = 3):
         imgSrc = self.__imgSrc
         if len(np.shape(imgSrc)) == 3:
             imgSrc = cv.cvtColor(imgSrc, cv.COLOR_BGR2GRAY)
@@ -418,6 +416,8 @@ class SiftFeature2D:
         pyramid_DOG_list = self.__BuildDogPyramid(imgSrc, init_sigma, octaves_layer_num, octaves_num)
         key_point_array = self.__AccurateKeyPointLocalization(pyramid_DOG_list, octaves_layer_num, octaves_num)
         self.__feature_array = self.__CalculateOrientationHist(pyramid_DOG_list, key_point_array)
+
+        fuck = sorted(self.__feature_array, key=lambda x: x[0][0])
         self.__descriptor_list = self.__DescriptorGeneration(pyramid_DOG_list, self.__feature_array, init_sigma)
 
         return self.descriptor_list
@@ -463,30 +463,38 @@ def Match(descriptor1:np.ndarray, descriptor2:np.ndarray, ratio = 2e-10):
     sumSqBEx = np.tile(sumSqB, (AB_t.shape[0], 1))
 
     SqED = sumSqBEx + sumSqAEx - 2 * AB_t
-    # SqED[SqED < 0] = 0.0
-    # ED = np.sqrt(SqED)
+    SqED[SqED < 0] = 0.0
+    ED = np.sqrt(SqED)
 
-    result = np.min(SqED, axis=1)
-    arg_min_index = np.argmin(SqED, axis=1)
-    result_min_index = np.where(result < 0)
+    result = np.min(ED, axis=1)
+    arg_min_index = np.argmin(ED, axis=1)
+    index_sorted = np.argsort(result, axis=None)
+    ind = np.unravel_index(index_sorted, result.shape)
+    elem_sorted = result[ind]
 
-    return result_min_index[0].tolist()[:20], arg_min_index[result_min_index].tolist()[0][:20]
+    return index_sorted[0].tolist()[0][:40], arg_min_index[ind].tolist()[0][:40]
 
-def Match2(descriptor1:np.ndarray, descriptor2:np.ndarray, ratio = 0.6):
+def Match2(descriptor1:np.ndarray, descriptor2:np.ndarray, ratio = 0.9):
     descriptor2_t = np.transpose(descriptor2)
     n, length = descriptor1.shape
 
-    matched = np.zeros((1, n), dtype=np.float32)
+    matched = np.zeros((n, 1), dtype=np.float32)
 
     for i in range(n):
         dotprods = np.dot(descriptor1[i, :], descriptor2_t)
+        dotprods = np.arccos(dotprods)
         index_sorted = np.argsort(dotprods, axis=None)
         ind = np.unravel_index(index_sorted, dotprods.shape)
         elem_sorted = dotprods[ind]
-        if elem_sorted[0] < ratio * elem_sorted[1]:
-            matched[i] = index_sorted[0]
 
-    return matched
+        if elem_sorted[0] < ratio *elem_sorted[1]:
+            matched[i] = index_sorted[0]
+        else:
+            matched[i] = -1
+
+    index = np.where(matched > -1)
+    print(matched.flatten())
+    return index[0].flatten(), matched[np.where(matched > -1)].flatten()
 
 
 

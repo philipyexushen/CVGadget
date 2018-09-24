@@ -11,9 +11,8 @@ def DrawPoint(imgSrc:np.ndarray, imgCorner:np.ndarray):
 
 def DrawFeature(imgSrc:np.ndarray, feature_array, index_choice):
     imgDst = imgSrc.copy()
-    for i, feature in enumerate(feature_array):
-        if i not in index_choice:
-            continue
+    for index in index_choice:
+        feature = feature_array[int(index)]
         point = feature[0]
         h, w, _, octave = point[:4]
 
@@ -38,13 +37,11 @@ if __name__ == "__main__":
     descriptor1 = factory1.GetFeatures()
     factory2 = SiftFeature2D(imgSrc2)
     descriptor2 = factory2.GetFeatures()
-    '''
-    feature1_index, feature2_index = Match(descriptor1, descriptor2)
 
-    print(feature1_index)
-    print(feature2_index)
-    imgDst1 = DrawFeature(factory1.image_source, factory1.feature_array, feature1_index)
-    imgDst2 = DrawFeature(factory2.image_source, factory2.feature_array, feature2_index)
+    # feature1_index, feature2_index = Match(descriptor1, descriptor2)
+    index, matched = Match2(descriptor1, descriptor2)
+    imgDst1 = DrawFeature(factory1.image_source, factory1.feature_array, index)
+    imgDst2 = DrawFeature(factory2.image_source, factory2.feature_array, matched)
 
     plt.figure(1)
     plt.subplot(121)
@@ -63,8 +60,8 @@ if __name__ == "__main__":
         plt.imshow(imgDst2, cmap="gray")
 
     plt.show()
-    '''
-    matched = Match2(descriptor1, descriptor2)
+
+    # matched = Match2(descriptor1, descriptor2)
 
 
     '''

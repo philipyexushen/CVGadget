@@ -33,22 +33,27 @@ if __name__ == "__main__":
     imgSrc = plt.imread("F:/win10/Philip/Documents/MATLAB/sift/scene.pgm")
     imgSrc2 = plt.imread("F:/win10/Philip/Documents/MATLAB/sift/book.pgm")
     # imgSrc = plt.imread("E:/Users/Administrator/pictures/queen/13.jpg")
+
+    plt.figure(1)
     factory1 = SiftFeature2D(imgSrc)
     descriptor1 = factory1.GetFeatures()
+    plt.subplot(121)
+    factory1.DrawKeyPoint()
     factory2 = SiftFeature2D(imgSrc2)
     descriptor2 = factory2.GetFeatures()
+    plt.subplot(122)
+    factory2.DrawKeyPoint()
 
     # feature1_index, feature2_index = Match(descriptor1, descriptor2)
     index, matched = Match2(descriptor1, descriptor2)
     imgDst1 = DrawFeature(factory1.image_source, factory1.feature_array, index)
     imgDst2 = DrawFeature(factory2.image_source, factory2.feature_array, matched)
 
-    plt.figure(1)
+    plt.figure(2)
     plt.subplot(121)
     if len(np.shape(factory1.image_source)) == 3:
         imgDst = cv.cvtColor(imgDst1, cv.COLOR_BGR2RGB)
         plt.imshow(imgDst)
-        plt.show()
     elif len(np.shape(factory1.image_source)) == 2:
         plt.imshow(imgDst1, cmap="gray")
 

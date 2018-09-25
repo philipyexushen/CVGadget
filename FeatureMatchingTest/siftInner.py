@@ -185,7 +185,7 @@ class SiftFeature2D:
         D_max = img_current[r, c] + 1 / 2 * D.dot(np.array([xr, xc, xs], dtype=np.float32))
 
         # 我也不知道为什么要乘以octaves_num ?
-        if np.abs(D_max) * octaves_num < threshold:
+        if np.abs(D_max) * octaves_layer_num < threshold:
             return False
 
         # 除不稳定的边缘响应点
@@ -203,7 +203,7 @@ class SiftFeature2D:
         if det <= 0 or tr**2 / det >= (curv_thr + 1)**2 / curv_thr:
             return False
 
-        key_point = (r, c, layer, octave, 2**((layer + 1) / octaves_layer_num))
+        key_point = (r, c, layer, octave, 2**(layer / octaves_layer_num))
         key_point_array.append(key_point)
         return True
 
@@ -230,12 +230,13 @@ class SiftFeature2D:
         return key_point_array
 
     @staticmethod
+    @jit
     def __GetGradient(imgSrc, r, c):
         height, width = imgSrc.shape[:2]
 
         assert 1 <= c < width - 1 and 1 <= r < height - 1
-        dy = imgSrc[r + 1, c] - imgSrc[r - 1, c]
-        dx = imgSrc[r, c - 1] - imgSrc[r, c + 1]
+        dy = imgSrc[r - 1, c] - imgSrc[r + 1, c]
+        dx = imgSrc[r, c + 1] - imgSrc[r, c - 1]
 
         m = np.sqrt(dx**2 + dy**2)
         theta =  np.arctan2(dy, dx)
@@ -261,7 +262,7 @@ class SiftFeature2D:
                 w = np.exp(-(i*i +j*j)/exp_sigma)
 
                 # 让范围落在self.__ori_hist_bins之内
-                angle = int(round(self.__ori_hist_bins*(theta + np.pi) / (2*np.pi)) % self.__ori_hist_bins)
+                angle = int(round(self.__ori_hist_bins*(theta + np.pi) / (2*np.pi))) % self.__ori_hist_bins
                 histogram[angle] += w*m
 
         temp_histogram = histogram.copy()
@@ -276,7 +277,7 @@ class SiftFeature2D:
         return histogram
 
     @MethodInformProvider
-    def __CalculateOrientationHist(self, pyramid_DOG_list, key_point_array):
+    def __CalculateOrientationHist(self, pyramid_DOG_list, key_point_array,  octaves_layer_num, init_sigma):
         ori_sig_fact = self.__ori_sig_fact
 
         feature_array = []
@@ -284,8 +285,8 @@ class SiftFeature2D:
             r, c, layer, octave, scale = key_point
 
             # 每一个关键点围绕他的1.5*3*尺度的半径进行寻找
-            sigma = ori_sig_fact * scale
-            radius = int(3 * sigma)
+            sigma = init_sigma * ori_sig_fact * scale
+            radius = int(round(3 * sigma))
             histogram = self.__CaculateHistogram(pyramid_DOG_list[octave][layer], r, c, radius, sigma)
 
             max_val = np.max(histogram)
@@ -307,12 +308,14 @@ class SiftFeature2D:
                 pos = self.__HistogramInterp(i, left, cur, right)
 
                 angle = pos / self.__ori_hist_bins * 2 *np.pi - np.pi
+                key_point = (r, c, layer, octave, 2**(octave - 2 + layer / octaves_layer_num))
                 feature = (key_point, angle)
                 feature_array.append(feature)
 
         return feature_array
 
     @staticmethod
+    @jit
     def __InterpolateHist(hist, r_bin, c_bin, theta_norm, m, descriptor_block_width, descriptor_ori_sum):
         r0 = int(np.floor(r_bin))
         c0 = int(np.floor(c_bin))
@@ -322,13 +325,15 @@ class SiftFeature2D:
         d_o = theta_norm - o0
 
         for i in (0, 1):
-            if r0 + i >= descriptor_block_width or r0 + i < 0:
+            r_index = r0 + i
+            if r_index >= descriptor_block_width or r_index < 0:
                 continue
             for j in (0, 1):
-                if c0 + j >= descriptor_block_width or c0 + j < 0:
+                c_index = c0 + j
+                if c_index >= descriptor_block_width or c_index < 0:
                     continue
                 for k in (0, 1):
-                    theta_norm_index = (theta_norm + k) % descriptor_ori_sum
+                    theta_norm_index = np.mod(o0 + k,descriptor_ori_sum )
 
                     # 双线性插值
                     # 下面这个写的好像很复杂，其实你把0和1代进去就看出来是什么了...，就是(1- x)和x的组合
@@ -336,15 +341,17 @@ class SiftFeature2D:
                                 * ( 0.5 + (d_c - 0.5)*(2*j-1) ) \
                                 * ( 0.5 + (d_o - 0.5)*(2*k-1) )
 
-                    hist_index = int((r0 + i)*descriptor_block_width*descriptor_ori_sum
-                                 + (c0 + j)*descriptor_ori_sum + theta_norm_index)
+                    hist_index = int(r_index*descriptor_block_width*descriptor_ori_sum
+                                        + c_index*descriptor_ori_sum
+                                        + theta_norm_index)
 
-                    hist[hist_index] = hist[hist_index] + value
+                    hist[hist_index] += value
 
     @staticmethod
+    @jit
     def __RemoveLightEffect(hist, descriptor_mag_thr):
         hist = hist / np.linalg.norm(hist)
-        hist[np.where(hist > 0.2)] = 0.2
+        hist[np.where(hist > descriptor_mag_thr)] = descriptor_mag_thr
         hist = hist / np.linalg.norm(hist)
         return hist
 
@@ -357,7 +364,7 @@ class SiftFeature2D:
         descriptor_size = descriptor_block_width*descriptor_block_width*descriptor_ori_sum
         descriptor_mag_thr = 0.2
 
-        descriptor_list = []
+        descriptor_feature_list = []
 
         for item in feature_array:
             key_point, angle = item
@@ -399,10 +406,13 @@ class SiftFeature2D:
 
             hist = self.__RemoveLightEffect(hist, descriptor_mag_thr)
 
-            descriptor_list.append((item, hist))
+            descriptor_feature_list.append((item, hist))
 
-        descriptor_list = [item[1] for item in sorted(descriptor_list, key=lambda x: x[0][0][4])]
-        return np.array(descriptor_list, np.float32)
+        descriptor_feature_list = sorted(descriptor_feature_list, key=lambda x: x[0][0][4], reverse=True)
+        descriptor_list = [item[1] for item in descriptor_feature_list]
+        feature_array = [item[0] for item in descriptor_feature_list]
+
+        return feature_array, np.array(descriptor_list, dtype=np.float32)
 
     @MethodInformProvider
     def GetFeatures(self, init_sigma = 1.6, octaves_layer_num = 3, octaves_num = 3):
@@ -415,15 +425,14 @@ class SiftFeature2D:
 
         pyramid_DOG_list = self.__BuildDogPyramid(imgSrc, init_sigma, octaves_layer_num, octaves_num)
         key_point_array = self.__AccurateKeyPointLocalization(pyramid_DOG_list, octaves_layer_num, octaves_num)
-        self.__feature_array = self.__CalculateOrientationHist(pyramid_DOG_list, key_point_array)
-
-        fuck = sorted(self.__feature_array, key=lambda x: x[0][0])
-        self.__descriptor_list = self.__DescriptorGeneration(pyramid_DOG_list, self.__feature_array, init_sigma)
+        self.__feature_array = self.__CalculateOrientationHist(pyramid_DOG_list, key_point_array, octaves_layer_num, init_sigma)
+        self.__feature_array, self.__descriptor_list = \
+            self.__DescriptorGeneration(pyramid_DOG_list, self.__feature_array, init_sigma)
 
         return self.descriptor_list
 
     def DrawKeyPoint(self):
-        imgDst = self.__imgSrc
+        imgDst = self.__imgSrc.copy()
         for feature in self.__feature_array:
             point = feature[0]
             h, w, _, octave = point[:4]
@@ -441,10 +450,8 @@ class SiftFeature2D:
         if len(np.shape(self.__imgSrc)) == 3:
             imgDst = cv.cvtColor(imgDst, cv.COLOR_BGR2RGB)
             plt.imshow(imgDst)
-            plt.show()
         elif len(np.shape(self.__imgSrc)) == 2:
             plt.imshow(imgDst, cmap="gray")
-            plt.show()
         else:
             raise NotImplementedError("wtf")
 
@@ -474,27 +481,30 @@ def Match(descriptor1:np.ndarray, descriptor2:np.ndarray, ratio = 2e-10):
 
     return index_sorted[0].tolist()[0][:40], arg_min_index[ind].tolist()[0][:40]
 
-def Match2(descriptor1:np.ndarray, descriptor2:np.ndarray, ratio = 0.9):
+def Match2(descriptor1:np.ndarray, descriptor2:np.ndarray, ratio = 0.76):
     descriptor2_t = np.transpose(descriptor2)
     n, length = descriptor1.shape
 
     matched = np.zeros((n, 1), dtype=np.float32)
+    matched_elem = np.zeros((n, 1), dtype=np.float32)
 
     for i in range(n):
-        dotprods = np.dot(descriptor1[i, :], descriptor2_t)
-        dotprods = np.arccos(dotprods)
-        index_sorted = np.argsort(dotprods, axis=None)
-        ind = np.unravel_index(index_sorted, dotprods.shape)
-        elem_sorted = dotprods[ind]
+        dot_prods = np.dot(descriptor1[i, :], descriptor2_t)
+        dot_prods = np.arccos(dot_prods)
+        index_sorted = np.argsort(dot_prods, axis=None)
+        ind = np.unravel_index(index_sorted, dot_prods.shape)
+        elem_sorted = dot_prods[ind]
 
         if elem_sorted[0] < ratio *elem_sorted[1]:
             matched[i] = index_sorted[0]
+            matched_elem[i] = elem_sorted[0]
         else:
             matched[i] = -1
+            matched_elem[i] = -1
 
     index = np.where(matched > -1)
-    print(matched.flatten())
-    return index[0].flatten(), matched[np.where(matched > -1)].flatten()
+    print(index[0].flatten())
+    return index[0].flatten(), matched[index].flatten()
 
 
 

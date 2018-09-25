@@ -308,7 +308,7 @@ class SiftFeature2D:
                 pos = self.__HistogramInterp(i, left, cur, right)
 
                 angle = pos / self.__ori_hist_bins * 2 *np.pi - np.pi
-                key_point = (r, c, layer, octave, 2**(octave - 2 + layer / octaves_layer_num))
+                key_point = (r, c, layer, octave, 2**((1 + layer) / octaves_layer_num))
                 feature = (key_point, angle)
                 feature_array.append(feature)
 
@@ -481,7 +481,7 @@ def Match(descriptor1:np.ndarray, descriptor2:np.ndarray, ratio = 2e-10):
 
     return index_sorted[0].tolist()[0][:40], arg_min_index[ind].tolist()[0][:40]
 
-def Match2(descriptor1:np.ndarray, descriptor2:np.ndarray, ratio = 0.76):
+def Match2(descriptor1:np.ndarray, descriptor2:np.ndarray, ratio = 0.8):
     descriptor2_t = np.transpose(descriptor2)
     n, length = descriptor1.shape
 
